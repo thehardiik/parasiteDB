@@ -58,6 +58,7 @@ class Schema {
         this.isInitialized = true;    
     }
 
+    
 
     async create(data) {
 
@@ -69,7 +70,7 @@ class Schema {
                     initInSheets = true;
                     this.isInitialized = true;
                     this.sheet = DB.doc.sheetsByIndex[i];
-                    // To Do  - add this.sheets
+                    // To Do  - Validation that initilized schema is as same as schema in google sheets
                     break;
                 }
             }
@@ -109,10 +110,25 @@ class Schema {
         return data
     }
 
-    // Method READ of CRUD
+    async findById(id){
 
-    // by id
-    async find(id){
+        let initInSheets
+
+        if(!this.isInitialized){
+            for(let i = 0; i < DB.doc.sheetsByIndex.length; i++){
+                if(this.name == DB.doc.sheetsByIndex[i].title){
+                    initInSheets = true;
+                    this.isInitialized = true;
+                    this.sheet = DB.doc.sheetsByIndex[i];
+                    // To Do  - Validation that initilized schema is as same as schema in google sheets
+                    break;
+                }
+            }
+        }
+
+        if(!initInSheets && !this.isInitialized){
+            throw new Error("There is no stored data for this schema")
+        }
 
         const cells = await this.sheet.loadCells("A" + id + ":Z" + id);
         let data = {};
@@ -126,6 +142,69 @@ class Schema {
 
         data.id = id;
         return data;
+    }
+
+    async findByPrimaryKey(primaryKey){
+
+        const id = hash(primaryKey)+1
+        return this.findById(id)
+
+    }
+
+    async update(primaryKey, data){
+
+        let initInSheets
+
+        if(!this.isInitialized){
+            for(let i = 0; i < DB.doc.sheetsByIndex.length; i++){
+                if(this.name == DB.doc.sheetsByIndex[i].title){
+                    initInSheets = true;
+                    this.isInitialized = true;
+                    this.sheet = DB.doc.sheetsByIndex[i];
+                    // To Do  - Validation that initilized schema is as same as schema in google sheets
+                    break;
+                }
+            }
+        }
+
+        if(!initInSheets && !this.isInitialized){
+            throw new Error("There is no stored data to be updated")
+        }
+
+        this.attributes.forEach((attribute) => {
+
+            if(!attribute.primaryKey && attribute.required && !(attribute.title in data)){
+                throw new Error("Required Field is missing");
+            }
+
+            if(attribute.primaryKey){
+                data.id = hash(primaryKey)+1
+                console.log(data.id)
+            }
+        });
+
+        // Loading all the required cells
+        const cells = await this.sheet.loadCells("A" + data.id + ":Z" + data.id);
+
+        // Adding new values to the cell
+        for(let i = 0; i < this.attributes.length; i++){
+            
+            if(this.attributes[i].title in data){
+                if(this.attributes[i].primaryKey){
+                    continue;
+                }
+                let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+                const cell = this.sheet.getCellByA1(ch + data.id);
+                cell.value = data[this.attributes[i].title]
+            }  
+        }
+
+        await this.sheet.saveUpdatedCells();
+
+        return data
+
+
+
     }
 
 

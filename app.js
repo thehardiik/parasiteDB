@@ -66,7 +66,45 @@ async function createUser(req, res) {
     }
 }
 
+async function updateUser(req, res) {
+    
+    const { caption, primaryKey, likes } = req.body; // Destructure data from req.body
+    const data = { caption, likes };
+    try {
+        const updatedUser = await userSchema.update(primaryKey, data)
+        res.status(201).json(updatedUser);
+
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+}
+
+async function getUser(req, res) {
+    
+    const {id} = req.body; // Destructure data from req.body
+    console.log(id);
+    
+    try {
+        //const User = await userSchema.findById(id)
+        const User = await userSchema.findByPrimaryKey(id)
+        res.status(201).json(User);
+
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+}
+
+
+
 app.post("/createUser" , (req, res) => {
     createUser(req, res);
+});
+
+app.post("/getUser" , (req, res) => {
+    getUser(req, res);
+});
+
+app.post("/updateUser" , (req, res) => {
+    updateUser(req, res);
 });
 
