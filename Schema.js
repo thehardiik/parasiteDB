@@ -207,6 +207,38 @@ class Schema {
 
     }
 
+    async delete(primaryKey) {
+
+        // Check if initialization has already occurred
+        if (!this.isInitialized) {
+          for (let i = 0; i < DB.doc.sheetsByIndex.length; i++) {
+            if (this.name === DB.doc.sheetsByIndex[i].title) {
+              this.isInitialized = true;
+              this.sheet = DB.doc.sheetsByIndex[i];
+              break;
+            }
+          }
+        }
+      
+        // Throw an error if the data hasn't been initialized
+        if (!this.isInitialized) {
+          throw new Error("There is no stored data to be deleted");
+        }
+      
+        // Find the row to be deleted based on the primary key
+        const rowToDelete = await this.findRow(primaryKey);
+      
+        // Ensure a row was found
+        if (!rowToDelete) {
+          throw new Error("No data found with the provided primary key");
+        }
+      
+        // Delete the row using the sheet API
+        await this.sheet.deleteRow(rowToDelete.index);
+      
+        return { message: "Data deleted successfully" };
+      }
+
 
 }
 
