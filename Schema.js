@@ -3,25 +3,101 @@ const {hash} = require("./hashing")
 
 class Schema {
 
+/*
+    Schema Class
+
+    Description:
+        Represents a schema for managing data in Google Sheets. The schema maps to a sheet and defines the structure of its attributes, 
+        including required fields and primary keys.
+
+    Instance Variables:
+        1. name (String):
+            - The name of the schema.
+        2. attributes (Array of Objects):
+            - A list of all attributes in the schema.
+            - Each attribute object contains:
+                - title (String): The name of the attribute.
+                - required (Boolean): Indicates if the attribute is mandatory.
+                - primaryKey (Boolean): Indicates if the attribute serves as the primary key.
+        3. sheet (Object):
+            - Reference to the Google Sheet object from the google-spreadsheet API.
+        4. model (Object):
+            - Configuration object used during the schema's initialization in Google Sheets.
+        5. isInitialized (Boolean):
+            - Tracks whether the schema is initialized in Google Sheets.
+
+    Methods:
+        1. constructor:
+            - Initializes the schema instance with:
+                - name: The schema name.
+                - attributes: The list of attributes.
+                - model: The configuration for schema initialization.
+                - sheet: Initially set to null.
+                - isInitialized: Initially set to false.
+        2. createSchema:
+            - Internal method to initialize the schema in Google Sheets.
+            - Updates the `sheet` reference and sets `isInitialized` to true.
+        3. create:
+            - Adds a new data entry to Google Sheets.
+            - Takes a data object as input.
+        4. findById:
+            - Retrieves a data entry using its unique ID.
+        5. findByPrimaryKey:
+            - Retrieves a data entry using its primary key.
+        6. update:
+            - Updates an existing data entry in Google Sheets.
+            - Takes the primary key and an object with updated data as input.
+        7. delete (To Be Implemented):
+            - Deletes a data entry using its ID or primary key.
+*/
+
+
+
+/*
+    Constructor: Initializes a Schema instance.
+
+    Parameters:
+        1. schemaName (String):
+            - The name of the schema.
+        2. schemaAttributes (Array of Objects):
+            - A list of attributes for the schema.
+
+    Description:
+        1. Ensures that the schema has at most one primary key.
+        2. Generates an array of header strings (`Headers`) from the schema attributes. Each header includes:
+            - The attribute title.
+            - Title + :
+                - "P" (Primary Key) or "NP" (Not Primary Key).
+                - "R" (Required) or "NR" (Not Required).
+        3. Creates a `model` object, which is used to initialize the schema in Google Sheets.
+*/
+
     constructor(schemaName,schemaAttributes){
 
+        let primaryKey = false  // to check is more than one attrubute is primary key
 
-        let primaryKey = false 
+        // JavaScript map method to get Headers
+        // Headers :- it is an array of string of all the titles with details about constraints (required and primary key)
+        // Headers is required in model object
+
         const Headers = schemaAttributes.map((attribute) => {
 
             if(attribute.primaryKey && primaryKey){
                 throw new Error("Only one attribute can be primary key")
             }
 
-            let returnValue = attribute.title;
+            let returnValue = attribute.title; 
 
+            // Add P if primary key, NP if not a primary key
             if(attribute.primaryKey){
                 primaryKey = true
-                returnValue = returnValue + " " + "P"
+                returnValue = returnValue + " " + "P" 
+
             }else{
                 returnValue = returnValue + " " + "NP"
             }
 
+            // Add R to attribute if Required, NR if not required
             if(attribute.required){
                 returnValue = returnValue + " " + "R"
             }else{
@@ -35,7 +111,7 @@ class Schema {
             title: schemaName,
             headerValues: Headers,
             gridProperties: {
-                rowCount: 100000
+                rowCount: 100000    // To be fixed.
             }     
         }
 
@@ -62,6 +138,8 @@ class Schema {
 
     async create(data) {
 
+
+        // To check if schema is already present in sheets
         let initInSheets
 
         if(!this.isInitialized){
@@ -171,6 +249,8 @@ class Schema {
             throw new Error("There is no stored data to be updated")
         }
 
+
+        // To think :- Should we allow user to change primary key
         this.attributes.forEach((attribute) => {
 
             if(!attribute.primaryKey && attribute.required && !(attribute.title in data)){
@@ -202,8 +282,6 @@ class Schema {
         await this.sheet.saveUpdatedCells();
 
         return data
-
-
 
     }
 
@@ -237,7 +315,7 @@ class Schema {
         await this.sheet.deleteRow(rowToDelete.index);
       
         return { message: "Data deleted successfully" };
-      }
+    }
 
 
 }

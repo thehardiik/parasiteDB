@@ -43,10 +43,6 @@ DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID)
   .catch(err => console.error("Error connecting to Google Sheets:", err));
 
 
-
-
-
-
 app.listen(3000, () => {
     console.log("Server is Running");
 })

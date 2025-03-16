@@ -18,8 +18,8 @@ class DB {
         const doc = new Spreadsheet.GoogleSpreadsheet(sheetID, serviceAccountAuth);
         await doc.loadInfo(); // loads document properties and worksheets
         this.doc = doc
-        //console.log(doc.sheetsByIndex.length);
 
+        // ToDo :- We need to track no. of cells used.
     }
 }
 
