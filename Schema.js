@@ -3,75 +3,6 @@ const {hash} = require("./hashing")
 
 class Schema {
 
-/*
-    Schema Class
-
-    Description:
-        Represents a schema for managing data in Google Sheets. The schema maps to a sheet and defines the structure of its attributes, 
-        including required fields and primary keys.
-
-    Instance Variables:
-        1. name (String):
-            - The name of the schema.
-        2. attributes (Array of Objects):
-            - A list of all attributes in the schema.
-            - Each attribute object contains:
-                - title (String): The name of the attribute.
-                - required (Boolean): Indicates if the attribute is mandatory.
-                - primaryKey (Boolean): Indicates if the attribute serves as the primary key.
-        3. sheet (Object):
-            - Reference to the Google Sheet object from the google-spreadsheet API.
-        4. model (Object):
-            - Configuration object used during the schema's initialization in Google Sheets.
-        5. isInitialized (Boolean):
-            - Tracks whether the schema is initialized in Google Sheets.
-
-    Methods:
-        1. constructor:
-            - Initializes the schema instance with:
-                - name: The schema name.
-                - attributes: The list of attributes.
-                - model: The configuration for schema initialization.
-                - sheet: Initially set to null.
-                - isInitialized: Initially set to false.
-        2. createSchema:
-            - Internal method to initialize the schema in Google Sheets.
-            - Updates the `sheet` reference and sets `isInitialized` to true.
-        3. create:
-            - Adds a new data entry to Google Sheets.
-            - Takes a data object as input.
-        4. findById:
-            - Retrieves a data entry using its unique ID.
-        5. findByPrimaryKey:
-            - Retrieves a data entry using its primary key.
-        6. update:
-            - Updates an existing data entry in Google Sheets.
-            - Takes the primary key and an object with updated data as input.
-        7. delete (To Be Implemented):
-            - Deletes a data entry using its ID or primary key.
-*/
-
-
-
-/*
-    Constructor: Initializes a Schema instance.
-
-    Parameters:
-        1. schemaName (String):
-            - The name of the schema.
-        2. schemaAttributes (Array of Objects):
-            - A list of attributes for the schema.
-
-    Description:
-        1. Ensures that the schema has at most one primary key.
-        2. Generates an array of header strings (`Headers`) from the schema attributes. Each header includes:
-            - The attribute title.
-            - Title + :
-                - "P" (Primary Key) or "NP" (Not Primary Key).
-                - "R" (Required) or "NR" (Not Required).
-        3. Creates a `model` object, which is used to initialize the schema in Google Sheets.
-*/
-
     constructor(schemaName,schemaAttributes){
 
         let primaryKey = false  // to check is more than one attrubute is primary key
@@ -92,7 +23,6 @@ class Schema {
             if(attribute.primaryKey){
                 primaryKey = true
                 returnValue = returnValue + " " + "P" 
-
             }else{
                 returnValue = returnValue + " " + "NP"
             }
@@ -129,17 +59,14 @@ class Schema {
             return null
         }
 
+        // Fix Code :- 2201
         const newSheet = await DB.doc.addSheet(this.model)
         this.sheet = newSheet
         this.isInitialized = true;    
     }
 
-    
+    async initialiseInSheets(mode){
 
-    async create(data) {
-
-
-        // To check if schema is already present in sheets
         let initInSheets
 
         if(!this.isInitialized){
@@ -154,9 +81,21 @@ class Schema {
             }
         }
 
-        if(!initInSheets){
+        if(!initInSheets && mode == "create"){
             await this.createSchema();
         }
+
+        if(!this.isInitialized && mode == "find"){
+            throw new Error("There is no stored data for this schema")
+        }
+    }
+    
+
+    async create(data) {
+
+
+        // To check if schema is already present in sheets
+        await this.initialiseInSheets("create")
 
         this.attributes.forEach((attribute) => {
 
@@ -166,12 +105,15 @@ class Schema {
 
             if(attribute.primaryKey){
                 data.id = hash(data[attribute.title])+1
-                console.log(data.id)
+                console.log(data.id) // ToBe Removed
             }
         });
    
         // Loading all the required cells
         const cells = await this.sheet.loadCells("A" + data.id + ":Z" + data.id);
+
+        // Fix Code :- 3350
+        // Fix Code :- 2201
 
         // Adding new values to the cell
         for(let i = 0; i < this.attributes.length; i++){
@@ -190,23 +132,7 @@ class Schema {
 
     async findById(id){
 
-        let initInSheets
-
-        if(!this.isInitialized){
-            for(let i = 0; i < DB.doc.sheetsByIndex.length; i++){
-                if(this.name == DB.doc.sheetsByIndex[i].title){
-                    initInSheets = true;
-                    this.isInitialized = true;
-                    this.sheet = DB.doc.sheetsByIndex[i];
-                    // To Do  - Validation that initilized schema is as same as schema in google sheets
-                    break;
-                }
-            }
-        }
-
-        if(!initInSheets && !this.isInitialized){
-            throw new Error("There is no stored data for this schema")
-        }
+        await this.initialiseInSheets("find")
 
         const cells = await this.sheet.loadCells("A" + id + ":Z" + id);
         let data = {};
@@ -231,23 +157,7 @@ class Schema {
 
     async update(primaryKey, data){
 
-        let initInSheets
-
-        if(!this.isInitialized){
-            for(let i = 0; i < DB.doc.sheetsByIndex.length; i++){
-                if(this.name == DB.doc.sheetsByIndex[i].title){
-                    initInSheets = true;
-                    this.isInitialized = true;
-                    this.sheet = DB.doc.sheetsByIndex[i];
-                    // To Do  - Validation that initilized schema is as same as schema in google sheets
-                    break;
-                }
-            }
-        }
-
-        if(!initInSheets && !this.isInitialized){
-            throw new Error("There is no stored data to be updated")
-        }
+        await this.initialiseInSheets("find")
 
 
         // To think :- Should we allow user to change primary key
@@ -287,21 +197,7 @@ class Schema {
 
     async delete(primaryKey) {
 
-        // Check if initialization has already occurred
-        if (!this.isInitialized) {
-          for (let i = 0; i < DB.doc.sheetsByIndex.length; i++) {
-            if (this.name === DB.doc.sheetsByIndex[i].title) {
-              this.isInitialized = true;
-              this.sheet = DB.doc.sheetsByIndex[i];
-              break;
-            }
-          }
-        }
-      
-        // Throw an error if the data hasn't been initialized
-        if (!this.isInitialized) {
-          throw new Error("There is no stored data to be deleted");
-        }
+        await this.isInitialized("find")
       
         // Find the row to be deleted based on the primary key
         const rowToDelete = await this.findRow(primaryKey);
@@ -319,7 +215,6 @@ class Schema {
 
 
 }
-
 
 exports.Schema = Schema
 

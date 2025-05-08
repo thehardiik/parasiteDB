@@ -3,8 +3,6 @@ const { DB } = require("./DB");
 const { Schema } = require("./Schema");
 require('dotenv').config();
 
-
-
 const app = express();
 app.use(express.json());
 
@@ -31,7 +29,7 @@ const attributes = [
 ];
 
 
-const userSchema = new Schema("userSchema" , attributes);
+const userSchema = new Schema("postSchema" , attributes);
 
 
 DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID)
