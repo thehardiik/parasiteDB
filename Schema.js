@@ -1,3 +1,4 @@
+const e = require("express")
 const {DB} = require("./DB")
 const {hash} = require("./hashing")
 
@@ -81,7 +82,7 @@ class Schema {
             }
         }
 
-        if(!initInSheets && mode == "create"){
+        if(!this.isInitialized && mode == "create"){
             await this.createSchema();
         }
 
@@ -95,8 +96,10 @@ class Schema {
 
 
         // To check if schema is already present in sheets
-        await this.initialiseInSheets("create")
-
+        if(!this.isInitialized){
+            await this.initialiseInSheets("create")
+        }
+        
         this.attributes.forEach((attribute) => {
 
             if(attribute.required && !(attribute.title in data)){
@@ -104,23 +107,70 @@ class Schema {
             }
 
             if(attribute.primaryKey){
-                data.id = hash(data[attribute.title])+1
-                console.log(data.id) // ToBe Removed
+                data._id = hash(data[attribute.title])+1
+                console.log(data._id) // ToBe Removed
             }
         });
-   
-        // Loading all the required cells
-        const cells = await this.sheet.loadCells("A" + data.id + ":Z" + data.id);
+
 
         // Fix Code :- 3350
         // Fix Code :- 2201
 
-        // Adding new values to the cell
+
+        let pk
+        let pkIndex
+
+        for(let i = 0; i < this.attributes.length; i++){
+            if(this.attributes[i].primaryKey){
+                pkIndex = i
+                pk = String.fromCharCode('A'.charCodeAt(0) + i);
+                break;
+            }
+        
+        }
+
+        console.log(pkIndex) // ToBe Removed
+        console.log(pk) // ToBe Removed
+
+        let sIndex = data._id
+        let eIndex = data._id+9
+        let insertIndex
+
+
+        while(true){
+
+            const cells = await this.sheet.loadCells("A" + sIndex + ":Z" + eIndex);
+            
+            for(let i = sIndex; i <= eIndex; i++){
+
+                //cell.formula = '=FILTER(B2:B4, A2:A4 = "Apple")'  // To be removed
+                //await this.sheet.saveUpdatedCells(); // To be removed
+                
+                if(checkCell.value == data[this.attributes[pkIndex].title]){
+                    throw new Error("Primary Key already exists")
+                }
+
+                if(!checkCell.value){
+                    insertIndex = i
+                    break
+                }
+                
+            }
+
+            if(insertIndex){
+                break
+            }
+
+            sIndex = eIndex +1
+            eIndex = sIndex+9
+
+        }
+
         for(let i = 0; i < this.attributes.length; i++){
             
             if(this.attributes[i].title in data){
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                const cell = this.sheet.getCellByA1(ch + data.id);
+                const cell = this.sheet.getCellByA1(ch + insertIndex);
                 cell.value = data[this.attributes[i].title]
             }  
         }
@@ -144,7 +194,7 @@ class Schema {
             data[key] = cell.value;
         }
 
-        data.id = id;
+        data._id = id;
         return data;
     }
 
@@ -168,13 +218,13 @@ class Schema {
             }
 
             if(attribute.primaryKey){
-                data.id = hash(primaryKey)+1
-                console.log(data.id)
+                data._id = hash(primaryKey)+1
+                console.log(data._id)
             }
         });
 
         // Loading all the required cells
-        const cells = await this.sheet.loadCells("A" + data.id + ":Z" + data.id);
+        const cells = await this.sheet.loadCells("A" + data._id + ":Z" + data._id);
 
         // Adding new values to the cell
         for(let i = 0; i < this.attributes.length; i++){
@@ -184,7 +234,7 @@ class Schema {
                     continue;
                 }
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                const cell = this.sheet.getCellByA1(ch + data.id);
+                const cell = this.sheet.getCellByA1(ch + data._id);
                 cell.value = data[this.attributes[i].title]
             }  
         }
