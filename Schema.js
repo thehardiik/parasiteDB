@@ -180,6 +180,12 @@ class Schema {
         return data
     }
 
+    async find(query){
+        // Step 1 :- Check for schema in sheets
+        // Step 2 :- process query
+        // Step 3 :- find the row according to query
+    }
+
     async findById(id){
 
         await this.initialiseInSheets("find")
