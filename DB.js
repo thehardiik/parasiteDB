@@ -19,6 +19,22 @@ class DB {
         await doc.loadInfo(); // loads document properties and worksheets
         //console.log(doc)
         this.doc = doc
+        
+        const querySheetExists = this.doc.sheetsByIndex.find(sheet => sheet.title === "Query");
+
+        if (!querySheetExists) {
+            console.log("True")
+            const model = {
+                title: "Query",
+                gridProperties: {
+                    rowCount: 100000    // To be fixed.
+                }     
+            }
+            const query = await this.doc.addSheet(model)
+            this.query = query
+        }else{
+            this.query = querySheetExists
+        }
 
         // ToDo :- We need to track no. of cells used.
         // Fix Code :- 2201

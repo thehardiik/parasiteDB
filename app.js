@@ -29,7 +29,7 @@ const attributes = [
 ];
 
 
-const userSchema = new Schema("postSchema" , attributes);
+const userSchema = new Schema("demnSchema" , attributes);
 
 
 DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID)
@@ -88,10 +88,28 @@ async function getUser(req, res) {
     }
 }
 
+async function findUser(req, res) {
+    
+    const {caption} = req.body; // Destructure data from req.body
+    
+    try {
+        //const User = await userSchema.findById(id)
+        const User = await userSchema.find({caption})
+        res.status(201).json(User);
+
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+}
+
 
 
 app.post("/createUser" , (req, res) => {
     createUser(req, res);
+});
+
+app.post("/findUser" , (req, res) => {
+    findUser(req, res);
 });
 
 app.post("/getUser" , (req, res) => {

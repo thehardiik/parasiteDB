@@ -145,6 +145,8 @@ class Schema {
 
                 //cell.formula = '=FILTER(B2:B4, A2:A4 = "Apple")'  // To be removed
                 //await this.sheet.saveUpdatedCells(); // To be removed
+
+                const checkCell = this.sheet.getCellByA1(pk + i);
                 
                 if(checkCell.value == data[this.attributes[pkIndex].title]){
                     throw new Error("Primary Key already exists")
@@ -181,9 +183,48 @@ class Schema {
     }
 
     async find(query){
+
         // Step 1 :- Check for schema in sheets
-        // Step 2 :- process query
+        await this.initialiseInSheets("find")
+
+        // Step 2 :- Parse query
+
+        const queryKeys = Object.keys(query);
+        const conditions = [];
+
+        for (const key of queryKeys) {
+            let found = false;
+            
+            for (let i = 0; i < this.attributes.length; i++) {
+                if (this.attributes[i].title === key) {
+                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
+                    conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                throw new Error(`Attribute '${key}' does not exist.`);
+            }
+        }
+
+        console.log(conditions)
+
+        const queryText = conditions.join(", ");
+        const finalQuery = `=FILTER(${this.name}!A:Z, ${queryText})`;
+
+        console.log(finalQuery)
+
+
         // Step 3 :- find the row according to query
+
+        const cells = await DB.query.loadCells("A1"  + ":Z1");
+        const formulaCell = DB.query.getCellByA1('A1');
+
+        formulaCell.formula = finalQuery
+        await DB.query.saveUpdatedCells();
+
     }
 
     async findById(id){
