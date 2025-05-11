@@ -92,7 +92,7 @@ class Schema {
     }
     
 
-    async create(data) {
+    async createData(data) {
 
 
         // To check if schema is already present in sheets
@@ -182,6 +182,8 @@ class Schema {
         return data
     }
 
+    async 
+
     async find(query){
 
         // Step 1 :- Check for schema in sheets
@@ -219,11 +221,25 @@ class Schema {
 
         // Step 3 :- find the row according to query
 
-        const cells = await DB.query.loadCells("A1"  + ":Z1");
-        const formulaCell = DB.query.getCellByA1('A1');
+        let cells = await DB.query.loadCells("A1"  + ":Z1");
+        let formulaCell = DB.query.getCellByA1('A1');
 
         formulaCell.formula = finalQuery
         await DB.query.saveUpdatedCells();
+
+        cells = await DB.query.loadCells("A1"  + ":Z1");
+        formulaCell = DB.query.getCellByA1('A1');
+
+        let data = {};
+
+        for(let i = 0; i < this.attributes.length; i++){
+            let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+            const cell = DB.query.getCellByA1(ch + 1);
+            const key = this.attributes[i].title
+            data[key] = cell.value;
+        }
+
+        return data;
 
     }
 
