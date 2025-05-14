@@ -12,6 +12,13 @@ class Schema {
         // Headers :- it is an array of string of all the titles with details about constraints (required and primary key)
         // Headers is required in model object
 
+        schemaAttributes.unshift({
+            title: "_id",
+            dataType: "String",
+            required: true,
+            primaryKey: false
+        })
+
         const Headers = schemaAttributes.map((attribute) => {
 
             if(attribute.primaryKey && primaryKey){
@@ -37,6 +44,7 @@ class Schema {
     
             return returnValue
         })
+
     
         const model = {
             title: schemaName,
@@ -94,11 +102,13 @@ class Schema {
 
     async createData(data) {
 
-
         // To check if schema is already present in sheets
         if(!this.isInitialized){
             await this.initialiseInSheets("create")
         }
+
+        // Data Validation Part
+        data._id = 1;
         
         this.attributes.forEach((attribute) => {
 
@@ -107,16 +117,12 @@ class Schema {
             }
 
             if(attribute.primaryKey){
+                // This needs to be changed
                 data._id = hash(data[attribute.title])+1
-                console.log(data._id) // ToBe Removed
             }
         });
-
-
-        // Fix Code :- 3350
-        // Fix Code :- 2201
-
-
+        
+        // Check if primary key already exist.
         let pk
         let pkIndex
 
@@ -127,52 +133,47 @@ class Schema {
                 break;
             }
         
+        }   
+
+        let cells = await DB.query.loadCells("A1"  + ":Z1");
+        let formulaCell = DB.query.getCellByA1('A1');
+        formulaCell.formula = `=FILTER(demnSchema!A:Z, demnSchema!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`
+
+        await DB.query.saveUpdatedCells();
+
+        cells = await DB.query.loadCells("A1"  + ":Z1");
+        formulaCell = DB.query.getCellByA1(pk + "1");
+
+        if(formulaCell.value == data[this.attributes[pkIndex].title]){
+            throw new Error("Data with this primary key already exist");
         }
 
-        console.log(pkIndex) // ToBe Removed
-        console.log(pk) // ToBe Removed
+        // Get the first empty index
+        formulaCell = DB.query.getCellByA1('A1');
+        formulaCell.formula = `=ARRAYFORMULA(MATCH(TRUE, ISBLANK(${this.name}!A:A), 0))`
+        await DB.query.saveUpdatedCells();
 
-        let sIndex = data._id
-        let eIndex = data._id+9
-        let insertIndex
+        cells = await DB.query.loadCells("A1"  + ":Z1");
+        formulaCell = DB.query.getCellByA1('A1');
 
+        let emptyIndex = 0;
 
-        while(true){
-
-            const cells = await this.sheet.loadCells("A" + sIndex + ":Z" + eIndex);
-            
-            for(let i = sIndex; i <= eIndex; i++){
-
-                //cell.formula = '=FILTER(B2:B4, A2:A4 = "Apple")'  // To be removed
-                //await this.sheet.saveUpdatedCells(); // To be removed
-
-                const checkCell = this.sheet.getCellByA1(pk + i);
-                
-                if(checkCell.value == data[this.attributes[pkIndex].title]){
-                    throw new Error("Primary Key already exists")
-                }
-
-                if(!checkCell.value){
-                    insertIndex = i
-                    break
-                }
-                
-            }
-
-            if(insertIndex){
-                break
-            }
-
-            sIndex = eIndex +1
-            eIndex = sIndex+9
-
+        if(formulaCell.value){
+            emptyIndex = Number(formulaCell.value)
         }
+
+        if(emptyIndex == 0){
+            throw new Error("Database is working at full utilization")
+        }
+
+        // Insert the Data at first empty index.
+        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
 
         for(let i = 0; i < this.attributes.length; i++){
             
             if(this.attributes[i].title in data){
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                const cell = this.sheet.getCellByA1(ch + insertIndex);
+                const cell = this.sheet.getCellByA1(ch + emptyIndex);
                 cell.value = data[this.attributes[i].title]
             }  
         }
@@ -182,7 +183,7 @@ class Schema {
         return data
     }
 
-    async 
+    
 
     async find(query){
 
@@ -190,7 +191,6 @@ class Schema {
         await this.initialiseInSheets("find")
 
         // Step 2 :- Parse query
-
         const queryKeys = Object.keys(query);
         const conditions = [];
 
@@ -240,8 +240,8 @@ class Schema {
         }
 
         return data;
-
     }
+
 
     async findById(id){
 
@@ -308,8 +308,9 @@ class Schema {
 
     }
 
-    async delete(primaryKey) {
+    async delete(id) {
 
+        // Check if the schema is initialized
         await this.isInitialized("find")
       
         // Find the row to be deleted based on the primary key

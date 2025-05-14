@@ -52,7 +52,7 @@ async function createUser(req, res) {
     const { caption, id, likes } = req.body; // Destructure data from req.body
     const data = { caption, id, likes };
     try {
-        const newUser = await userSchema.create(data)
+        const newUser = await userSchema.createData(data)
         res.status(201).json(newUser);
 
     } catch (error) {
