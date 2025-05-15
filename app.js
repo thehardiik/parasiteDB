@@ -62,10 +62,11 @@ async function createUser(req, res) {
 
 async function updateUser(req, res) {
     
-    const { caption, primaryKey, likes } = req.body; // Destructure data from req.body
-    const data = { caption, likes };
+    const { caption, likes, newCaption } = req.body; // Destructure data from req.body
+    const data = { caption: newCaption};
+    const query = { caption, likes };
     try {
-        const updatedUser = await userSchema.update(primaryKey, data)
+        const updatedUser = await userSchema.updateOne(query, data)
         res.status(201).json(updatedUser);
 
     } catch (error) {
@@ -73,14 +74,15 @@ async function updateUser(req, res) {
     }
 }
 
-async function getUser(req, res) {
+
+
+async function findUser(req, res) {
     
-    const {id} = req.body; // Destructure data from req.body
-    console.log(id);
+    const {caption, likes} = req.body; // Destructure data from req.body
     
     try {
         //const User = await userSchema.findById(id)
-        const User = await userSchema.findByPrimaryKey(id)
+        const User = await userSchema.find({caption, likes})
         res.status(201).json(User);
 
     } catch (error) {
@@ -88,13 +90,13 @@ async function getUser(req, res) {
     }
 }
 
-async function findUser(req, res) {
+async function deleteUser(req, res) {
     
-    const {caption} = req.body; // Destructure data from req.body
+    const {caption, likes} = req.body; // Destructure data from req.body
     
     try {
         //const User = await userSchema.findById(id)
-        const User = await userSchema.find({caption})
+        const User = await userSchema.deleteOne({caption, likes})
         res.status(201).json(User);
 
     } catch (error) {
@@ -112,8 +114,8 @@ app.post("/findUser" , (req, res) => {
     findUser(req, res);
 });
 
-app.post("/getUser" , (req, res) => {
-    getUser(req, res);
+app.post("/deleteUser" , (req, res) => {
+    deleteUser(req, res);
 });
 
 app.post("/updateUser" , (req, res) => {
