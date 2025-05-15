@@ -100,7 +100,7 @@ class Schema {
     }
     
 
-    async createData(data) {
+    async create(data) {
 
         // To check if schema is already present in sheets
         if(!this.isInitialized){
@@ -126,33 +126,38 @@ class Schema {
         let pk
         let pkIndex
 
+            // Loop To Find Primary Key Index (can we optimize it?)
         for(let i = 0; i < this.attributes.length; i++){
             if(this.attributes[i].primaryKey){
                 pkIndex = i
                 pk = String.fromCharCode('A'.charCodeAt(0) + i);
                 break;
             }
-        
         }   
 
+            // Query to find if given primary key already exist
         let cells = await DB.query.loadCells("A1"  + ":Z1");
         let formulaCell = DB.query.getCellByA1('A1');
         formulaCell.formula = `=FILTER(demnSchema!A:Z, demnSchema!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`
-
         await DB.query.saveUpdatedCells();
 
+            // Get the result of a query
         cells = await DB.query.loadCells("A1"  + ":Z1");
         formulaCell = DB.query.getCellByA1(pk + "1");
 
+            // Check to verify that primary key exist
         if(formulaCell.value == data[this.attributes[pkIndex].title]){
             throw new Error("Data with this primary key already exist");
         }
 
         // Get the first empty index
+
+            // Query to get first empty row 
         formulaCell = DB.query.getCellByA1('A1');
         formulaCell.formula = `=ARRAYFORMULA(MATCH(TRUE, ${this.name}!A:A = "", 0))`
         await DB.query.saveUpdatedCells();
 
+            // Get the result of query
         cells = await DB.query.loadCells("A1"  + ":Z1");
         formulaCell = DB.query.getCellByA1('A1');
 
@@ -183,59 +188,30 @@ class Schema {
         return data
     }
 
-    
-
     async find(query){
 
         // Step 1 :- Check for schema in sheets
         await this.initialiseInSheets("find")
 
         // Step 2 :- Parse query
-        const queryKeys = Object.keys(query);
-        const conditions = [];
+        const finalQuery = this.parseQuery(query, "DATA");
 
-        for (const key of queryKeys) {
-            let found = false;
-            
-            for (let i = 0; i < this.attributes.length; i++) {
-                if (this.attributes[i].title === key) {
-                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                    if(this.attributes[i].dataType == "Integer"){
-                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
-                    }else{
-                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
-                    }
-                    found = true;
-                    break;
-                }
-            }
+        // Step 3 :- Find the row according to query
 
-            if (!found) {
-                throw new Error(`Attribute '${key}' does not exist.`);
-            }
-        }
-
-        console.log(conditions)
-
-        const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(${this.name}!A:Z, ${queryText})`;
-
-        console.log(finalQuery)
-
-
-        // Step 3 :- find the row according to query
-
+            // Query to find the row according to query
         let cells = await DB.query.loadCells("A1"  + ":Z1");
         let formulaCell = DB.query.getCellByA1('A1');
 
         formulaCell.formula = finalQuery
         await DB.query.saveUpdatedCells();
-
+            
+            // Get Result from a query
         cells = await DB.query.loadCells("A1"  + ":Z1");
         formulaCell = DB.query.getCellByA1('A1');
 
         let data = {};
 
+            // Prepare the data to return.
         for(let i = 0; i < this.attributes.length; i++){
             let ch = String.fromCharCode('A'.charCodeAt(0) + i);
             const cell = DB.query.getCellByA1(ch + 1);
@@ -252,43 +228,14 @@ class Schema {
         await this.initialiseInSheets("find")
 
         // Step 2 :- Parse query
-        const queryKeys = Object.keys(query);
-        const conditions = [];
-
-        for (const key of queryKeys) {
-            let found = false;
-            
-            for (let i = 0; i < this.attributes.length; i++) {
-                if (this.attributes[i].title === key) {
-                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                    if(this.attributes[i].dataType == "Integer"){
-                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
-                    }else{
-                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
-                    }
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                throw new Error(`Attribute '${key}' does not exist.`);
-            }
-        }
-
-        console.log(conditions)
-
-        const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
-
-        console.log(finalQuery)
-
+        const finalQuery = this.parseQuery(query, "ROW");
+    
+        // Delete row according to query
+            // Query to find the given row;
         let cells = await DB.query.loadCells("A1"  + ":Z1");
         let formulaCell = DB.query.getCellByA1('A1');
-
         formulaCell.formula = finalQuery
         await DB.query.saveUpdatedCells();
-
         cells = await DB.query.loadCells("A1"  + ":Z1");
         formulaCell = DB.query.getCellByA1('A1');
 
@@ -302,7 +249,7 @@ class Schema {
             throw new Error("No data found with this query")
         }
 
-        // Insert the Data at first empty index.
+            // Delete the Data on given row
         cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
 
         for(let i = 0; i < this.attributes.length; i++){
@@ -310,7 +257,7 @@ class Schema {
             if(this.attributes[i].title){
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
                 const cell = this.sheet.getCellByA1(ch + emptyIndex);
-                cell.value = null;
+                cell.value = "";
             }  
         }
 
@@ -326,6 +273,48 @@ class Schema {
         await this.initialiseInSheets("find")
 
         // Step 2 :- Parse query
+        const finalQuery = this.parseQuery(query, "ROW");
+
+
+        // Update according to query
+            // Query to find row to be updated 
+        let cells = await DB.query.loadCells("A1"  + ":Z1");
+        let formulaCell = DB.query.getCellByA1('A1');
+        formulaCell.formula = finalQuery
+        await DB.query.saveUpdatedCells();
+
+        cells = await DB.query.loadCells("A1"  + ":Z1");
+        formulaCell = DB.query.getCellByA1('A1');
+
+        let emptyIndex = 0;
+
+        if(formulaCell.value){
+            emptyIndex = Number(formulaCell.value)
+        }
+
+        if(emptyIndex == 0){
+            throw new Error("No data found with this query")
+        }
+
+        // Update the Data at first empty index.
+        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+
+        for(let i = 0; i < this.attributes.length; i++){
+            
+            if(this.attributes[i].title in data){
+                let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+                const cell = this.sheet.getCellByA1(ch + emptyIndex);
+                cell.value = data[this.attributes[i].title]
+            }  
+        }
+
+        await this.sheet.saveUpdatedCells();
+
+        return data
+    }
+
+    parseQuery(query, querType){
+
         const queryKeys = Object.keys(query);
         const conditions = [];
 
@@ -350,47 +339,20 @@ class Schema {
             }
         }
 
-        console.log(conditions)
-
         const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
 
-        console.log(finalQuery)
+        let finalQuery = "";
 
-        let cells = await DB.query.loadCells("A1"  + ":Z1");
-        let formulaCell = DB.query.getCellByA1('A1');
-
-        formulaCell.formula = finalQuery
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1('A1');
-
-        let emptyIndex = 0;
-
-        if(formulaCell.value){
-            emptyIndex = Number(formulaCell.value)
+        if(querType == "DATA"){
+            finalQuery = `=FILTER(${this.name}!A:Z, ${queryText})`;
         }
 
-        if(emptyIndex == 0){
-            throw new Error("No data found with this query")
+        if(querType == "ROW"){
+            finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
         }
+       
+        return finalQuery;
 
-        // Insert the Data at first empty index.
-        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
-
-        for(let i = 0; i < this.attributes.length; i++){
-            
-            if(this.attributes[i].title in data){
-                let ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                const cell = this.sheet.getCellByA1(ch + emptyIndex);
-                cell.value = data[this.attributes[i].title]
-            }  
-        }
-
-        await this.sheet.saveUpdatedCells();
-
-        return data
     }
 
 
