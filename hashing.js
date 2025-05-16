@@ -1,13 +1,16 @@
 const crypto = require('crypto');
 
-function hash(input) {
-    // Create a hash of the string
-    const hash = crypto.createHash('md5').update(input).digest('hex');
-    // Convert the hash to a number and take modulo 10^6
-    const uniqueInt = parseInt(hash, 16)%99999;
-    return uniqueInt;
+
+function nanoid(size = 21) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'; 
+  const bytes = crypto.randomBytes(size);
+  let id = '';
+  for (let i = 0; i < size; i++) {
+    id += alphabet[bytes[i] & 63]; 
+  }
+  return id;
 }
 
-exports.hash = hash
+exports.nanoid = nanoid
 
 
