@@ -1,6 +1,7 @@
 const e = require("express")
 const {DB} = require("./DB")
 const {nanoid} = require("./hashing")
+const { logEntry } = require("./logger")
 
 class Schema {
 
@@ -59,9 +60,15 @@ class Schema {
         this.sheet = null
         this.model = model
         this.isInitialized = false;
+        this.loggerConfig = {
+            enabled: true,
+            logFilePath: "parasite.log.txt",
+            redact: []
+            
+        }
+
     }
 
-    
     async createSchema(){
 
         if(!DB.doc){
@@ -91,6 +98,8 @@ class Schema {
         }
 
         if(!this.isInitialized && mode == "create"){
+            let content = `CREATE SCHEMA : ${this.name} \n`
+            logEntry(content);
             await this.createSchema();
         }
 
@@ -106,6 +115,7 @@ class Schema {
         if(!this.isInitialized){
             await this.initialiseInSheets("create")
         }
+
 
         // Data Validation Check
         data._id = 1;
@@ -161,6 +171,7 @@ class Schema {
 
         // Insert the Data at first empty index.
         let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+        let content = `CREATE IN ${this.name} : `;
 
         for(let i = 0; i < this.attributes.length; i++){
             
@@ -168,7 +179,17 @@ class Schema {
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
                 const cell = this.sheet.getCellByA1(ch + emptyIndex);
                 cell.value = data[this.attributes[i].title]
+
+                if(!this.loggerConfig.redact.includes(this.attributes[i].title)){
+                    content = content + data[this.attributes[i].title] + " "
+                }
+                
             }  
+        }
+            // Log Entry
+        content = content + "AT INDEX " + emptyIndex + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
         }
 
         await this.sheet.saveUpdatedCells();
@@ -181,8 +202,13 @@ class Schema {
         // Shema Intialization Check
         await this.initialiseInSheets("find")
 
-        // Parse query
-        const finalQuery = this.parseQuery(query, "DATA");
+        // Parse query and Log Query
+        let content = `FIND IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "DATA");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
 
         // Step 3 :- Find the row according to query
 
@@ -208,9 +234,14 @@ class Schema {
         // Schema Initialization Check.
         await this.initialiseInSheets("find")
 
-        // Parse Query
-        const finalQuery = this.parseQuery(query, "ROW");
-    
+        // Parse Query and Log Query
+        let content = `DELETE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
+
         // Delete row according to query
 
             // Query to find the given row;
@@ -249,8 +280,13 @@ class Schema {
         // Schema Initialization Check
         await this.initialiseInSheets("find")
 
-        // Parse query
-        const finalQuery = this.parseQuery(query, "ROW");
+        // Parse query and Log Query
+        let content = `UPDATE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
 
 
         // Update according to query
@@ -289,6 +325,8 @@ class Schema {
         const queryKeys = Object.keys(query);
         const conditions = [];
 
+        let logContent = ""
+
         for (const key of queryKeys) {
             let found = false;
             
@@ -299,6 +337,9 @@ class Schema {
                         conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
                     }else{
                         conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
+                    }
+                    if(!this.loggerConfig.redact.includes(this.attributes[i].title)){
+                        logContent = logContent + key + " " + query[key] + " "
                     }
                     found = true;
                     break;
@@ -322,7 +363,7 @@ class Schema {
             finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
         }
        
-        return finalQuery;
+        return {finalQuery, logContent};
 
     }
 
@@ -342,6 +383,12 @@ class Schema {
         return formulaCell;
     }
 
+    configureLogger(config){
+        this.loggerConfig = {
+            ...this.loggerConfig, // preserve existing/defaults
+            ...config             // override with provided values
+        };
+    }
 
 
 }
