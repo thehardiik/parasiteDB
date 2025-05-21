@@ -2,6 +2,7 @@ const express = require("express");
 const { DB } = require("./DB");
 const { Schema } = require("./Schema");
 require('dotenv').config();
+const {Transaction} = require("./Transaction")
 
 const app = express();
 app.use(express.json());
@@ -104,6 +105,38 @@ async function deleteUser(req, res) {
     }
 }
 
+async function implementTransaction(req, res) {
+    
+    
+   const { caption, id, likes, _id } = req.body; // Destructure data from req.body
+
+   
+    const data = {caption: "Manish", id: 20, likes: 1000};
+    const query = { _id};
+
+    const trans = new Transaction();
+
+    try {
+
+        trans.start()
+        const deleteUser = await userSchema.deleteOne(query, trans)
+        const newUser = await userSchema.create(data, trans)
+        //query._id = newUser._id
+        
+        console.log(trans.buffer)
+        
+        trans.commit()
+
+        res.status(201).json(newUser);
+
+    } catch (error) {
+        trans.rollback()
+        res.status(400).json({ error: error.message });
+    } finally {
+        trans.end()
+    }
+}
+
 
 
 app.post("/createUser" , (req, res) => {
@@ -120,5 +153,9 @@ app.post("/deleteUser" , (req, res) => {
 
 app.post("/updateUser" , (req, res) => {
     updateUser(req, res);
+});
+
+app.post("/transaction" , (req, res) => {
+    implementTransaction(req, res);
 });
 
