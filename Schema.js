@@ -51,7 +51,7 @@ class Schema {
             title: schemaName,
             headerValues: Headers,
             gridProperties: {
-                rowCount: 100000    // To be fixed.
+                rowCount: 1000    // To be fixed.
             }     
         }
 
@@ -294,7 +294,7 @@ class Schema {
 
     }
 
-    async updateOne(query, data, transaction){ 
+    async updateOne(query, data, transaction = null){ 
 
         // Schema Initialization Check
         await this.initialiseInSheets("find")
@@ -440,7 +440,7 @@ class Schema {
         
         // Check if primary key already exist.
         let pk
-        let pkIndex
+        let pkIndex = -1
 
             // Loop To Find Primary Key Index (can we optimize it?) (do we even need primary key in this database?)
         for(let i = 0; i < this.attributes.length; i++){
@@ -449,15 +449,17 @@ class Schema {
                 pk = String.fromCharCode('A'.charCodeAt(0) + i);
                 break;
             }
-        }   
+        } 
+        
+        console.log(pkIndex)
+        console.log("Reached here")
         
             // Query to find if given primary key already exist 
         let finalQuery = `=FILTER(${this.name}!A:Z, ${this.name}!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`;
         let formulaCell = await this.query(finalQuery, pk + "1");
 
         // Check if primary key already exist in Sheet
-        if(formulaCell.value == data[this.attributes[pkIndex].title]){
-            
+        if(pkIndex != -1 && formulaCell.value == data[this.attributes[pkIndex].title]){
             
             // Check if delete operation is present in transaction buffer.
             const alreadyBuffered = transaction.buffer.some(entry =>
@@ -471,14 +473,22 @@ class Schema {
             }
             
             // If yes, then we will change the operation to update, and push it into buffer.
-            transaction.buffer = transaction.buffer.filter(entry =>
-                !(entry.OPERATION === "DELETE" && entry.DATA[primaryKeyTitle] == data[primaryKeyTitle])
+            const deleteIndex = transaction.buffer.findIndex(entry =>
+                entry.OPERATION === "DELETE" && entry.DATA[primaryKeyTitle] === data[primaryKeyTitle]
             );
 
+            const originalData = transaction.buffer[deleteIndex].ORIGINAL;
+
+            if (deleteIndex !== -1) {
+                transaction.buffer.splice(deleteIndex, 1);
+            }
+
             transaction.buffer.push({
-                SCHEMA: this.name,
+                SCHEMA: this,
                 OPERATION: "UPDATE",
-                DATA: { ...data}
+                DATA: { ...data}, 
+                STATUS: "UNCOMMITTED",
+                ORIGINAL: originalData       // Here it needs to be checked.
             })
 
             return data;
@@ -501,9 +511,11 @@ class Schema {
 
         // Push the data to transaction buffer
         transaction.buffer.push({
-            SCHEMA: this.name,
+            SCHEMA: this,
             OPERATION: "CREATE",
-            DATA: { ...data}
+            DATA: { ...data},
+            STATUS: "UNCOMMITTED", 
+            ORIGINAL: null
         })
 
         //console.log(transaction.buffer)
@@ -618,6 +630,7 @@ class Schema {
         // Parse query and Log Query
         const query = {_id: data._id}
         console.log(query)
+        console.log("Reached")
         let content = `UPDATE IN ${this.name} : `
         const {finalQuery, logContent} = this.parseQuery(query, "ROW");
         content = content + logContent + '\n';
@@ -662,9 +675,11 @@ class Schema {
         }
 
         transaction.buffer.push({
-            SCHEMA: this.name,
+            SCHEMA: this,
             OPERATION: "UPDATE",
-            DATA: finalData
+            DATA: finalData,
+            STATUS: "UNCOMMITTED",
+            ORIGINAL: newData
         })
 
         return finalData
@@ -706,9 +721,11 @@ class Schema {
             const updatedData = transaction.buffer[updateIndex].DATA;
             transaction.buffer.splice(updateIndex, 1); // remove UPDATE
             transaction.buffer.push({
-                SCHEMA: this.name,
+                SCHEMA: this,
                 OPERATION: "DELETE",
-                DATA: updatedData
+                DATA: updatedData,
+                STATUS: "UNCOMMITTED", 
+                ORIGINAL: transaction.buffer[updateIndex].ORIGINAL
             });
             return updatedData;
         }
@@ -763,15 +780,15 @@ class Schema {
         }
 
         transaction.buffer.push({
-            SCHEMA: this.name,
+            SCHEMA: this,
             OPERATION: "DELETE",
-            DATA: finalData
+            DATA: finalData,
+            STATUS: "UNCOMMITTED",
+            ORIGINAL: newData
         })
 
         return finalData
     }
-
-
 
 
 }

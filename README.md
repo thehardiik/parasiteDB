@@ -1,157 +1,328 @@
-# ParasiteDB Documentation
+# ParasiteDB
 
-## Introduction
-ParasiteDB is a lightweight Node.js library that utilizes Google Sheets as a cloud-based database. It provides an abstraction layer to perform CRUD operations on Google Sheets while allowing schema definition, primary key management, and data validation.
 
-## Installation
-Ensure you have Node.js installed and then include ParasiteDB in your project:
+
+**ParasiteDB** is a lightweight, Google Sheets-backed database library that transforms Google Sheets into a functional database with ORM-like capabilities. Perfect for rapid prototyping, small applications, or when you need spreadsheet integration with database functionality.
+
+## ✨ Features
+
+- 🗄️ **ORM-like Interface** - Familiar database operations (CRUD) on Google Sheets
+- 🔄 **ACID Transactions** - Full transaction support with commit/rollback
+- 📋 **Schema Validation** - Define data structure with type checking and constraints
+- 🔒 **Row Locking** - Prevents concurrent modification conflicts
+- 📝 **Comprehensive Logging** - Built-in logging with sensitive data redaction
+- ⚡ **Auto ID Generation** - Automatic unique identifier creation
+- 🛡️ **Error Handling** - Robust error handling and validation
+
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
-npm install google-spreadsheet express dotenv
+npm install express google-spreadsheet google-auth-library dotenv crypto
 ```
 
-Create a `.env` file in your project root with the following:
+### Setup
 
-```plaintext
-EMAIL=your-service-account-email
-KEY=your-private-key
-SHEETID=your-google-sheet-id
-```
+1. **Create Google Service Account**
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select existing one
+   - Enable Google Sheets API
+   - Create Service Account and download JSON key
 
-## Setup
-Create a basic Express server to integrate ParasiteDB:
+2. **Configure Environment**
+   ```env
+   EMAIL=your-service-account@project.iam.gserviceaccount.com
+   KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+   SHEETID=your-google-sheet-id
+   ```
+
+3. **Share Google Sheet** with your service account email
+
+### Basic Usage
 
 ```javascript
-const express = require("express");
-const { DB } = require("./DB");
-const { Schema } = require("./Schema");
+const { DB } = require('./DB');
+const { Schema } = require('./Schema');
 require('dotenv').config();
+
+// Define your data structure
+const userAttributes = [
+    {
+        title: "username",
+        dataType: "String",
+        required: true,
+        primaryKey: true
+    },
+    {
+        title: "email", 
+        dataType: "String",
+        required: true,
+        primaryKey: false
+    },
+    {
+        title: "age",
+        dataType: "Integer",
+        required: false,
+        primaryKey: false
+    }
+];
+
+// Create schema
+const userSchema = new Schema("Users", userAttributes);
+
+// Connect to database
+async function init() {
+    try {
+        await DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID);
+        console.log("✅ Connected to Google Sheets");
+        
+        // Create a user
+        const newUser = await userSchema.create({
+            username: "john_doe",
+            email: "john@example.com", 
+            age: 25
+        });
+        
+        console.log("👤 User created:", newUser);
+        
+        // Find the user
+        const foundUser = await userSchema.find({ username: "john_doe" });
+        console.log("🔍 User found:", foundUser);
+        
+    } catch (error) {
+        console.error("❌ Error:", error.message);
+    }
+}
+
+init();
+```
+
+## 📚 API Reference
+
+### Schema Operations
+
+```javascript
+// Create record
+const user = await schema.create({
+    username: "alice",
+    email: "alice@example.com"
+});
+
+// Find record
+const user = await schema.find({ username: "alice" });
+
+// Update record  
+const updated = await schema.updateOne(
+    { username: "alice" },
+    { email: "alice.new@example.com" }
+);
+
+// Delete record
+await schema.deleteOne({ username: "alice" });
+```
+
+### Transactions
+
+```javascript
+const { Transaction } = require('./Transaction');
+
+const transaction = new Transaction();
+
+try {
+    transaction.start();
+    
+    // Multiple operations in single transaction
+    await userSchema.create({ username: "user1", email: "user1@example.com" }, transaction);
+    await userSchema.create({ username: "user2", email: "user2@example.com" }, transaction);
+    
+    await transaction.commit();
+    console.log("✅ Transaction completed");
+    
+} catch (error) {
+    await transaction.rollback();
+    console.error("❌ Transaction failed:", error.message);
+} finally {
+    transaction.end();
+}
+```
+
+## 🏗️ Express.js Integration
+
+```javascript
+const express = require('express');
+const { DB } = require('./DB');
+const { Schema } = require('./Schema');
 
 const app = express();
 app.use(express.json());
 
-DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID)
-  .then(() => console.log("Connected to Google Sheets"))
-  .catch(err => console.error("Error connecting to Google Sheets:", err));
-
-app.listen(3000, () => console.log("Server is running"));
-```
-
-## Schema Definition
-Define a schema for your Google Sheet with attributes:
-
-```javascript
-const attributes = [
-    { title: "caption", dataType: "String", required: true, primaryKey: false },
+const postSchema = new Schema("BlogPosts", [
+    { title: "title", dataType: "String", required: true, primaryKey: false },
     { title: "id", dataType: "Integer", required: true, primaryKey: true },
-    { title: "likes", dataType: "Integer", required: true, primaryKey: false }
-];
+    { title: "content", dataType: "String", required: true, primaryKey: false }
+]);
 
-const userSchema = new Schema("userSchema", attributes);
-```
+// Initialize database connection
+DB.connectDB(process.env.EMAIL, process.env.KEY, process.env.SHEETID)
+    .then(() => console.log("🗄️ Database connected"))
+    .catch(err => console.error("❌ Database connection failed:", err));
 
-### Attribute Constraints
-- `title`: Attribute name.
-- `dataType`: Defines the data type (`String`, `Integer`).
-- `required`: If `true`, the attribute must be provided during CRUD operations.
-- `primaryKey`: Only one attribute can have this set to `true`.
-
-## CRUD Operations
-
-### Create a New Entry
-Adds a new row to the Google Sheet.
-
-```javascript
-async function createUser(req, res) {
-    const { caption, id, likes } = req.body;
+// REST API endpoints
+app.post('/posts', async (req, res) => {
     try {
-        const newUser = await userSchema.create({ caption, id, likes });
-        res.status(201).json(newUser);
+        const post = await postSchema.create(req.body);
+        res.status(201).json(post);
     } catch (error) {
         res.status(400).json({ error: error.message });
+    }
+});
+
+app.get('/posts/:id', async (req, res) => {
+    try {
+        const post = await postSchema.find({ id: parseInt(req.params.id) });
+        res.json(post);
+    } catch (error) {
+        res.status(404).json({ error: error.message });
+    }
+});
+
+app.listen(3000, () => {
+    console.log('🚀 Server running on http://localhost:3000');
+});
+```
+
+## ⚙️ Configuration
+
+### Logger Configuration
+
+```javascript
+schema.configureLogger({
+    enabled: true,
+    logFilePath: "app.log",
+    redact: ["password", "email"] // Hide sensitive fields in logs
+});
+```
+
+### Schema Attributes
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `title` | string | Column name |
+| `dataType` | "String" \| "Integer" | Data type |
+| `required` | boolean | Whether field is mandatory |
+| `primaryKey` | boolean | Whether field is primary key (only one per schema) |
+
+## 📖 Documentation
+
+For detailed documentation, examples, and advanced usage:
+
+- [Full Documentation](./DOCUMENTATION.md)
+- [API Reference](./API.md)
+- [Examples](./examples/)
+- [Best Practices](./BEST_PRACTICES.md)
+
+## 🔧 Advanced Features
+
+### Batch Operations
+```javascript
+// Use transactions for multiple operations
+const transaction = new Transaction();
+transaction.start();
+
+await schema.create(data1, transaction);
+await schema.create(data2, transaction);
+await schema.updateOne(query, data3, transaction);
+
+await transaction.commit();
+```
+
+### Error Handling
+```javascript
+try {
+    await schema.create(invalidData);
+} catch (error) {
+    if (error.message.includes("Required Field")) {
+        // Handle validation error
+    } else if (error.message.includes("primary key")) {
+        // Handle duplicate key error
     }
 }
 ```
 
-**Constraints:**
-- All `required` attributes must be provided.
-- `primaryKey` is auto-generated using a hash function.
+## 🚨 Limitations
 
-### Read an Entry by Primary Key
-Fetches a row using the primary key.
+- **Performance**: Limited by Google Sheets API quotas (100 requests/100 seconds)
+- **Scalability**: Maximum 10 million cells per spreadsheet
+- **Queries**: No complex queries (joins, aggregations)
+- **Concurrent Users**: Best for small teams or single-user applications
 
-```javascript
-async function getUser(req, res) {
-    const { id } = req.body;
-    try {
-        const user = await userSchema.findByPrimaryKey(id);
-        res.status(200).json(user);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-}
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**Authentication Error**
+```bash
+Error: Authentication failed
+```
+- ✅ Verify service account email and private key
+- ✅ Ensure Google Sheet is shared with service account
+- ✅ Check Google Sheets API is enabled
+
+**Rate Limiting**
+```bash
+Error: Quota exceeded  
+```
+- ✅ Reduce operation frequency
+- ✅ Use transactions to batch operations
+- ✅ Implement retry logic
+
+**Primary Key Violation**
+```bash
+Error: Data with this primary key already exist
+```
+- ✅ Ensure unique primary key values
+- ✅ Check existing data in spreadsheet
+
+## 🤝 Contributing
+
+We welcome contributions! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/parasitedb.git
+
+# Install dependencies
+npm install
+
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your Google Sheets credentials
+
+# Run tests
+npm test
 ```
 
-**Constraints:**
-- Requires a valid `primaryKey`.
-- Throws an error if the key doesn't exist.
+## 📄 License
 
-### Update an Entry
-Modifies an existing row.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-```javascript
-async function updateUser(req, res) {
-    const { caption, primaryKey, likes } = req.body;
-    try {
-        const updatedUser = await userSchema.update(primaryKey, { caption, likes });
-        res.status(200).json(updatedUser);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-}
-```
+## 🙏 Acknowledgments
 
-**Constraints:**
-- `primaryKey` must be provided.
-- All `required` attributes, except the `primaryKey`, must be included.
+- Built with [google-spreadsheet](https://www.npmjs.com/package/google-spreadsheet)
+- Inspired by traditional ORM libraries
+- Thanks to Google Sheets API for making this possible
 
-### Delete an Entry
-Removes a row using the primary key.
+## 📊 Project Stats
 
-```javascript
-async function deleteUser(req, res) {
-    const { primaryKey } = req.body;
-    try {
-        const result = await userSchema.delete(primaryKey);
-        res.status(200).json(result);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
-    }
-}
-```
-
-**Constraints:**
-- Requires a valid `primaryKey`.
-- Throws an error if the entry doesn't exist.
-
-## API Endpoints
-
-| Method | Endpoint      | Description       |
-|------- |---------------|------------------|
-| POST   | /createUser   | Create new entry |
-| POST   | /getUser      | Get entry by key |
-| POST   | /updateUser   | Update an entry  |
-| POST   | /deleteUser   | Delete an entry  |
-
-## Error Handling
-- `"Only one attribute can be primary key"`: Occurs if multiple primary keys are defined.
-- `"Required Field is missing"`: Happens when `required` attributes are not provided.
-- `"There is no stored data for this schema"`: When attempting to read from an uninitialized schema.
-- `"No data found with the provided primary key"`: For non-existing entries.
-
-## Conclusion
-ParasiteDB simplifies working with Google Sheets by adding a structured schema layer and CRUD operations. It is ideal for lightweight, cloud-based apps where Google Sheets acts as a database.
+![GitHub stars](https://img.shields.io/github/stars/yourusername/parasitedb?style=social)
+![GitHub forks](https://img.shields.io/github/forks/yourusername/parasitedb?style=social)
+![GitHub issues](https://img.shields.io/github/issues/yourusername/parasitedb)
 
 ---
-Feel free to extend functionalities or raise issues!
 
+**Made with ❤️ for developers who need simple, spreadsheet-backed databases**
+
+*Perfect for prototyping, small applications, and when you need the power of a database with the familiarity of a spreadsheet.*

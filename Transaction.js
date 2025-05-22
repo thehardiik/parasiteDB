@@ -20,25 +20,85 @@ class Transaction {
         this.status = "INACTIVE";
     }
 
-    commit(){
+    async commit(){
+
+        for(let i = 0; i < this.buffer.length; i++){
+
+            const query = this.buffer[i];
+            const sheet = query.SCHEMA;
+            const queryType = query.OPERATION;
+            const data = query.DATA;
+           
+
+            if(queryType === "CREATE"){
+                await sheet.create(data);
+                this.buffer[i].STATUS = "COMMITTED";
+            }
+            
+            if(queryType === "UPDATE"){
+                await sheet.updateOne({_id: data._id}, data);
+                this.buffer[i].STATUS = "COMMITTED";
+            }
+            
+            if(queryType === "DELETE"){
+                await sheet.deleteOne(data);
+                this.buffer[i].STATUS = "COMMITTED";    
+            }
+        }
+
+        return "Transaction Committed"
         
-        // If we reached here, it means that all the queries in transaction will not fail.
-        // Update all the queries in the transaction to the sheets.
-               // CREATE :- simply create a new row in the sheet.
-               // READ :- Only unlock is needed.
-               // UPDATE :- If the row exist in the buffer, the update will be done in the buffer, and in sequence
-               // DELETE :- If the row exist in the buffer, the queries for same row before deletion will not be valid.
-        // Unlock all the sheets.
-        // Mark the transaction as COMMITTED.
+        
     }
 
-    rollback(){
+    async rollback(){
          
-        // Something bad has happened
-        // Revert all the queries which were updated in transaction.
-        // We have to maintain the initial state of the sheets.
-        // Unlock all the sheets.
-        // Mark the transaction as ROLLBACKED.
+        while(!this.checkSafety()){
+
+            const uncommitted = this.buffer.filter(entry => 
+                entry.STATUS === "COMMITTED"
+            )
+
+            for(let i = this.buffer.length-1; i >= 0; i--){
+                let entry = uncommitted[i];
+                switch (entry.OPERATION) {
+
+                    case "CREATE":
+                    // Try to delete the created row
+                    await this.SCHEMA.deleteOne({ _id: entry.DATA._id });
+                    this.STATUS = "ROLLBACKED"
+                    break;
+
+                    case "DELETE":
+                    // Re-create original row if it doesn't exist
+                    await this.SCHEMA.create(entry.ORIGINAL);
+                    this.STATUS = "ROLLBACKED"
+                    break;
+
+                    case "UPDATE":
+                    // Restore original only if the current row matches the bad update
+                    await this.SCHEMA.updateOne({ _id: entry.DATA._id }, entry.ORIGINAL);
+                    this.STATUS = "ROLLBACKED"
+                    break;
+                }
+            }
+        }
+
+        
+       
+    }
+
+    checkSafety(){
+
+        const uncommitted = this.buffer.filter(entry => 
+            entry.STATUS === "COMMITTED"
+        )
+
+        if(uncommitted.length > 0){
+            return false;
+        }
+
+        return true;
     }
 
 }
