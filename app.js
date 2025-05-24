@@ -8,6 +8,11 @@ const app = express();
 app.use(express.json());
 
 
+// Remaining Tasks To Do
+// Write transactions.end()
+// Fix Locking Mechanism
+// Make rollback prone to failure.
+
 const attributes = [
     {
         title: "Name",
