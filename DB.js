@@ -1,9 +1,11 @@
 const Spreadsheet = require("google-spreadsheet")
-const google = require("google-auth-library")
+const google = require("google-auth-library");
 
 class DB {
     
     static doc = null;
+
+    activeTransactions = [];
 
     static async connectDB(email, key, sheetID){
             
@@ -39,6 +41,14 @@ class DB {
         // ToDo :- We need to track no. of cells used.
         // Fix Code :- 2201
     }
+
+    async safetyCheck(){
+        // Check all the active transactions and call route function for them to ensure they are rollbacked and unlocked
+    }
+
+
 }
+
+
 
 exports.DB = DB

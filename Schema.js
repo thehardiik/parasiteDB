@@ -1,6 +1,7 @@
 const e = require("express")
 const {DB} = require("./DB")
-const {hash} = require("./hashing")
+const {nanoid} = require("./hashing")
+const { logEntry } = require("./logger")
 
 class Schema {
 
@@ -50,7 +51,7 @@ class Schema {
             title: schemaName,
             headerValues: Headers,
             gridProperties: {
-                rowCount: 100000    // To be fixed.
+                rowCount: 1000    // To be fixed.
             }     
         }
 
@@ -59,9 +60,15 @@ class Schema {
         this.sheet = null
         this.model = model
         this.isInitialized = false;
+        this.loggerConfig = {
+            enabled: true,
+            logFilePath: "parasite.log.txt",
+            redact: []
+            
+        }
+
     }
 
-    
     async createSchema(){
 
         if(!DB.doc){
@@ -91,6 +98,8 @@ class Schema {
         }
 
         if(!this.isInitialized && mode == "create"){
+            let content = `CREATE SCHEMA : ${this.name} \n`
+            logEntry(content, this.loggerConfig.logFilePath);
             await this.createSchema();
         }
 
@@ -100,15 +109,23 @@ class Schema {
     }
     
 
-    async createData(data) {
+    async create(data, transaction = null) {
 
-        // To check if schema is already present in sheets
+        // Schema Initialization Check
         if(!this.isInitialized){
             await this.initialiseInSheets("create")
         }
+    
+        // For Transactions
+        if(transaction != null && transaction.status == "ACTIVE"){
+            return this.createTransaction(data, transaction);
+        }
 
-        // Data Validation Part
+
+        // Data Validation Check
         data._id = 1;
+
+        let primaryKeyTitle = "";
         
         this.attributes.forEach((attribute) => {
 
@@ -118,7 +135,8 @@ class Schema {
 
             if(attribute.primaryKey){
                 // This needs to be changed
-                data._id = hash(data[attribute.title])+1
+                primaryKeyTitle = attribute.title;
+                data._id = nanoid()
             }
         });
         
@@ -126,35 +144,29 @@ class Schema {
         let pk
         let pkIndex
 
+            // Loop To Find Primary Key Index (can we optimize it?) (do we even need primary key in this database?)
         for(let i = 0; i < this.attributes.length; i++){
             if(this.attributes[i].primaryKey){
                 pkIndex = i
                 pk = String.fromCharCode('A'.charCodeAt(0) + i);
                 break;
             }
-        
         }   
-
-        let cells = await DB.query.loadCells("A1"  + ":Z1");
-        let formulaCell = DB.query.getCellByA1('A1');
-        formulaCell.formula = `=FILTER(demnSchema!A:Z, demnSchema!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`
-
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1(pk + "1");
+        
+            // Query to find if given primary key already exist 
+        
+        let finalQuery = `=FILTER(${this.name}!A:Z, ${this.name}!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`;
+        let formulaCell = await this.query(finalQuery, pk + "1");
 
         if(formulaCell.value == data[this.attributes[pkIndex].title]){
             throw new Error("Data with this primary key already exist");
         }
+ 
 
         // Get the first empty index
-        formulaCell = DB.query.getCellByA1('A1');
-        formulaCell.formula = `=ARRAYFORMULA(MATCH(TRUE, ${this.name}!A:A = "", 0))`
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1('A1');
+        finalQuery = `=ARRAYFORMULA(MATCH(TRUE, ${this.name}!A:A = "", 0))`
+        formulaCell = await this.query(finalQuery, 'A1');
+        
 
         let emptyIndex = 0;
 
@@ -167,7 +179,8 @@ class Schema {
         }
 
         // Insert the Data at first empty index.
-        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+        let content = `CREATE IN ${this.name} : `;
 
         for(let i = 0; i < this.attributes.length; i++){
             
@@ -175,7 +188,17 @@ class Schema {
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
                 const cell = this.sheet.getCellByA1(ch + emptyIndex);
                 cell.value = data[this.attributes[i].title]
+
+                if(!this.loggerConfig.redact.includes(this.attributes[i].title)){
+                    content = content + data[this.attributes[i].title] + " "
+                }
+                
             }  
+        }
+            // Log Entry
+        content = content + "AT INDEX " + emptyIndex + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
         }
 
         await this.sheet.saveUpdatedCells();
@@ -183,59 +206,32 @@ class Schema {
         return data
     }
 
-    
+    async find(query, transaction = null){
 
-    async find(query){
-
-        // Step 1 :- Check for schema in sheets
+        // Shema Intialization Check
         await this.initialiseInSheets("find")
 
-        // Step 2 :- Parse query
-        const queryKeys = Object.keys(query);
-        const conditions = [];
-
-        for (const key of queryKeys) {
-            let found = false;
-            
-            for (let i = 0; i < this.attributes.length; i++) {
-                if (this.attributes[i].title === key) {
-                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                    if(this.attributes[i].dataType == "Integer"){
-                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
-                    }else{
-                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
-                    }
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                throw new Error(`Attribute '${key}' does not exist.`);
-            }
+        if(transaction != null && transaction.status == "ACTIVE"){
+            return await this.findTransaction(query, transaction)
         }
 
-        console.log(conditions)
+        // Parse query and Log Query
+        let content = `FIND IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "DATA");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
 
-        const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(${this.name}!A:Z, ${queryText})`;
+        // Step 3 :- Find the row according to query
 
-        console.log(finalQuery)
-
-
-        // Step 3 :- find the row according to query
-
-        let cells = await DB.query.loadCells("A1"  + ":Z1");
-        let formulaCell = DB.query.getCellByA1('A1');
-
-        formulaCell.formula = finalQuery
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1('A1');
+            // Query to find the row according to query
+        
+        let formulaCell = await this.query(finalQuery, 'A1');
 
         let data = {};
 
+            // Prepare the data to return.
         for(let i = 0; i < this.attributes.length; i++){
             let ch = String.fromCharCode('A'.charCodeAt(0) + i);
             const cell = DB.query.getCellByA1(ch + 1);
@@ -243,54 +239,32 @@ class Schema {
             data[key] = cell.value;
         }
 
+        
+
         return data;
     }
 
-    async deleteOne(query){
+    async deleteOne(query, transaction = null){
 
-        // Step 1 :- Check for schema in sheets
+        // Schema Initialization Check.
         await this.initialiseInSheets("find")
 
-        // Step 2 :- Parse query
-        const queryKeys = Object.keys(query);
-        const conditions = [];
-
-        for (const key of queryKeys) {
-            let found = false;
-            
-            for (let i = 0; i < this.attributes.length; i++) {
-                if (this.attributes[i].title === key) {
-                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                    if(this.attributes[i].dataType == "Integer"){
-                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
-                    }else{
-                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
-                    }
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                throw new Error(`Attribute '${key}' does not exist.`);
-            }
+        if(transaction != null && transaction.status == "ACTIVE"){
+            return await this.deleteTransaction(query, transaction)
         }
 
-        console.log(conditions)
+        // Parse Query and Log Query
+        let content = `DELETE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
 
-        const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
+        // Delete row according to query
 
-        console.log(finalQuery)
-
-        let cells = await DB.query.loadCells("A1"  + ":Z1");
-        let formulaCell = DB.query.getCellByA1('A1');
-
-        formulaCell.formula = finalQuery
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1('A1');
+            // Query to find the given row;
+        let formulaCell = await this.query(finalQuery, 'A1');
 
         let emptyIndex = 0;
 
@@ -302,15 +276,15 @@ class Schema {
             throw new Error("No data found with this query")
         }
 
-        // Insert the Data at first empty index.
-        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+            // Delete the Data on given row
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
 
         for(let i = 0; i < this.attributes.length; i++){
             
             if(this.attributes[i].title){
                 let ch = String.fromCharCode('A'.charCodeAt(0) + i);
                 const cell = this.sheet.getCellByA1(ch + emptyIndex);
-                cell.value = null;
+                cell.value = "";
             }  
         }
 
@@ -320,51 +294,27 @@ class Schema {
 
     }
 
-    async updateOne(query, data){ 
+    async updateOne(query, data, transaction = null){ 
 
-        // Step 1 :- Check for schema in sheets
+        // Schema Initialization Check
         await this.initialiseInSheets("find")
 
-        // Step 2 :- Parse query
-        const queryKeys = Object.keys(query);
-        const conditions = [];
-
-        for (const key of queryKeys) {
-            let found = false;
-            
-            for (let i = 0; i < this.attributes.length; i++) {
-                if (this.attributes[i].title === key) {
-                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
-                    if(this.attributes[i].dataType == "Integer"){
-                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
-                    }else{
-                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
-                    }
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                throw new Error(`Attribute '${key}' does not exist.`);
-            }
+        if(transaction != null && transaction.status == "ACTIVE"){
+            return await this.updateTransaction(query, transaction)
         }
 
-        console.log(conditions)
+        // Parse query and Log Query
+        let content = `UPDATE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
 
-        const queryText = conditions.join(", ");
-        const finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
 
-        console.log(finalQuery)
-
-        let cells = await DB.query.loadCells("A1"  + ":Z1");
-        let formulaCell = DB.query.getCellByA1('A1');
-
-        formulaCell.formula = finalQuery
-        await DB.query.saveUpdatedCells();
-
-        cells = await DB.query.loadCells("A1"  + ":Z1");
-        formulaCell = DB.query.getCellByA1('A1');
+        // Update according to query
+            // Query to find row to be updated 
+        let formulaCell = await this.query(finalQuery, 'A1');
 
         let emptyIndex = 0;
 
@@ -376,8 +326,8 @@ class Schema {
             throw new Error("No data found with this query")
         }
 
-        // Insert the Data at first empty index.
-        cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+        // Update the Data at first empty index.
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
 
         for(let i = 0; i < this.attributes.length; i++){
             
@@ -393,6 +343,452 @@ class Schema {
         return data
     }
 
+    parseQuery(query, querType){
+
+        // console.log(query)
+
+        const queryKeys = Object.keys(query);
+        const conditions = [];
+
+        let logContent = ""
+
+        for (const key of queryKeys) {
+            let found = false;
+            
+            for (let i = 0; i < this.attributes.length; i++) {
+                if (this.attributes[i].title === key) {
+                    const ch = String.fromCharCode('A'.charCodeAt(0) + i);
+                    if(this.attributes[i].dataType == "Integer"){
+                        conditions.push(`${this.name}!${ch}:${ch}=${query[key]}`);
+                    }else{
+                        conditions.push(`${this.name}!${ch}:${ch}="${query[key]}"`);
+                    }
+                    if(!this.loggerConfig.redact.includes(this.attributes[i].title)){
+                        logContent = logContent + key + " " + query[key] + " "
+                    }
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                throw new Error(`Attribute '${key}' does not exist.`);
+            }
+        }
+
+        const queryText = conditions.join(", ");
+
+        let finalQuery = "";
+
+        if(querType == "DATA"){
+            finalQuery = `=FILTER(${this.name}!A:Z, ${queryText})`;
+        }
+
+        if(querType == "ROW"){
+            finalQuery = `=FILTER(ROW(${this.name}!A:Z), ${queryText})`;
+        }
+
+        
+       
+        return {finalQuery, logContent};
+
+    }
+
+    async query(Query, Cell){
+
+        // Get Cell On which we have to perform query
+        let cells = await DB.query.loadCells("A1"  + ":Z1");
+        let formulaCell = DB.query.getCellByA1('A1');
+
+        // Add Query Formula
+        formulaCell.formula = Query
+        await DB.query.saveUpdatedCells();
+
+        // Retrive Queried Cell
+        cells = await DB.query.loadCells("A1"  + ":Z1");
+        formulaCell = DB.query.getCellByA1(Cell);
+        return formulaCell;
+    }
+
+    configureLogger(config){
+        this.loggerConfig = {
+            ...this.loggerConfig, // preserve existing/defaults
+            ...config             // override with provided values
+        };
+    }
+
+    async createTransaction(data, transaction){
+
+        // Data Validation Check
+        data._id = 1;
+
+        let primaryKeyTitle = "";
+        
+        this.attributes.forEach((attribute) => {
+
+            if(attribute.required && !(attribute.title in data)){
+                throw new Error("Required Field is missing");
+            }
+
+            if(attribute.primaryKey){
+                // This needs to be changed
+                primaryKeyTitle = attribute.title;
+                data._id = nanoid()
+            }
+        });
+
+        
+        // Check if primary key already exist.
+        let pk
+        let pkIndex = -1
+
+            // Loop To Find Primary Key Index (can we optimize it?) (do we even need primary key in this database?)
+        for(let i = 0; i < this.attributes.length; i++){
+            if(this.attributes[i].primaryKey){
+                pkIndex = i
+                pk = String.fromCharCode('A'.charCodeAt(0) + i);
+                break;
+            }
+        } 
+        
+        console.log(pkIndex)
+        console.log("Reached here")
+        
+            // Query to find if given primary key already exist 
+        let finalQuery = `=FILTER(${this.name}!A:Z, ${this.name}!${pk}:${pk}="${data[this.attributes[pkIndex].title]}")`;
+        let formulaCell = await this.query(finalQuery, pk + "1");
+
+        // Check if primary key already exist in Sheet
+        if(pkIndex != -1 && formulaCell.value == data[this.attributes[pkIndex].title]){
+            
+            // Check if delete operation is present in transaction buffer.
+            const alreadyBuffered = transaction.buffer.some(entry =>
+                entry.OPERATION === "DELETE" && entry.DATA[primaryKeyTitle] == data[primaryKeyTitle]
+            );
+
+            console.log(primaryKeyTitle)
+
+            if (!alreadyBuffered) {
+                throw new Error("This primary key already exists in database");
+            }
+            
+            // If yes, then we will change the operation to update, and push it into buffer.
+            const deleteIndex = transaction.buffer.findIndex(entry =>
+                entry.OPERATION === "DELETE" && entry.DATA[primaryKeyTitle] === data[primaryKeyTitle]
+            );
+
+            const originalData = transaction.buffer[deleteIndex].ORIGINAL;
+
+            if (deleteIndex !== -1) {
+                transaction.buffer.splice(deleteIndex, 1);
+            }
+
+            transaction.buffer.push({
+                SCHEMA: this,
+                OPERATION: "UPDATE",
+                DATA: { ...data}, 
+                STATUS: "UNCOMMITTED",
+                ORIGINAL: originalData       // Here it needs to be checked.
+            })
+
+            return data;
+        }
+
+        // Check if rows are empty.
+            // To be decided later
+
+        // No primaryKey is present in sheets.
+       
+        // Check if primaryKey is present in transaction buffer.
+        const alreadyBuffered = transaction.buffer.some(entry =>
+            entry.OPERATION === "CREATE" && entry.DATA[primaryKeyTitle] === data[primaryKeyTitle]
+        );
+
+        if (alreadyBuffered) {
+            throw new Error("This primary key already exists in transaction buffer");
+        }
+        
+
+        // Push the data to transaction buffer
+        transaction.buffer.push({
+            SCHEMA: this,
+            OPERATION: "CREATE",
+            DATA: { ...data},
+            STATUS: "UNCOMMITTED", 
+            ORIGINAL: null
+        })
+
+        //console.log(transaction.buffer)
+
+        return data;
+    
+    }
+
+    async findTransaction(query, transaction){
+
+        // Before even we start to check in the sheets, first we have to look in the transaction buffer.
+        const deleteEntries = transaction.buffer.filter(entry =>
+            entry.OPERATION === "DELETE" && entry.DATA._id === query._id
+        );
+
+        if(deleteEntries.length > 0){
+            throw new Error("This data does not exist anymore.");
+        }
+
+        const createEntries = transaction.buffer.filter(entry =>
+            entry.OPERATION === "CREATE" && entry.DATA._id === query._id
+        );
+        if(createEntries.length > 0){
+            return createEntries[0].DATA;
+        }
+
+        // If not present in transaction buffer, then we will check in the sheets.
+
+        // Parse query and Log Query
+        let content = `UPDATE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
+
+
+        // Find according to query
+            // Query to find row to be updated 
+        let formulaCell = await this.query(finalQuery, 'A1');
+
+        let emptyIndex = 0;
+
+        if(formulaCell.value){
+            emptyIndex = Number(formulaCell.value)
+        }
+
+        if(emptyIndex == 0){
+            throw new Error("No data found with this query")
+        }
+
+        // Lock the row.
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+        const cell = this.sheet.getCellByA1('Z' + emptyIndex);
+        cell.value = "SHARED";
+
+        let data = {};
+
+            // Prepare the data to return.
+        for(let i = 0; i < this.attributes.length; i++){
+            let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+            let cell = this.sheet.getCellByA1(ch + emptyIndex);
+            const key = this.attributes[i].title
+            data[key] = cell.value;
+        }
+
+        await this.sheet.saveUpdatedCells();
+
+        return data
+    }
+
+    async updateTransaction(data, transaction){
+        
+        // Check the buffer, if the data is present in the buffer, check for the updata and create and delete operations.
+
+        // If DELETE operation is present in the buffer, then we will throw an error.
+        const deleteEntries = transaction.buffer.filter(entry =>
+            entry.OPERATION === "DELETE" && entry.DATA._id === data._id
+        );
+
+        if(deleteEntries.length > 0){
+            throw new Error("This data does not exist anymore.");
+        }
+
+        // If CREATE operation is present in the buffer, then we will update this CREATE operation with the new data.
+        const createIndex = transaction.buffer.findIndex(entry =>
+            entry.OPERATION === "CREATE" && entry.DATA._id === data._id
+        );
+
+        if (createIndex !== -1) {
+            let baseData = transaction.buffer[createIndex].DATA;
+            const merged = { ...baseData, ...data };
+            transaction.buffer[createIndex].DATA = merged;
+            return merged;
+        }
+
+        // If UPDATE operation is present in the buffer, then we will update this UPDATE operation with the new data.
+        const updateIndex = transaction.buffer.findIndex(entry =>
+            entry.OPERATION === "UPDATE" && entry.DATA._id === data._id
+        );
+        if (updateIndex !== -1) {
+            let baseData = transaction.buffer[updateIndex].DATA;
+            const merged = { ...baseData, ...data };
+            transaction.buffer[updateIndex].DATA = merged;
+            return merged;
+        }
+
+        
+            
+        // Reaching here means that the data is not present in the buffer, so we will check in the sheets.
+
+        // Parse query and Log Query
+        const query = {_id: data._id}
+        console.log(query)
+        console.log("Reached")
+        let content = `UPDATE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
+        
+            // Query to find row to be updated 
+        let formulaCell = await this.query(finalQuery, 'A1');
+
+        let emptyIndex = 0;
+
+        if(formulaCell.value){
+            emptyIndex = Number(formulaCell.value)
+        }
+
+        if(emptyIndex == 0){
+            throw new Error("No data found with this query")
+        }
+
+        // Lock the row and get data
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+
+        let newData = {}
+
+        for(let i = 0; i < this.attributes.length; i++){
+            let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+            let cell = this.sheet.getCellByA1(ch + emptyIndex);
+            const key = this.attributes[i].title
+            newData[key] = cell.value;
+        }
+
+        const cell = this.sheet.getCellByA1('Z' + emptyIndex);
+
+        // Locking This Row
+        cell.value = "EXCLUSIVE"
+        await this.sheet.saveUpdatedCells();
+
+        const finalData = {
+            ...newData,
+            ...data
+        }
+
+        transaction.buffer.push({
+            SCHEMA: this,
+            OPERATION: "UPDATE",
+            DATA: finalData,
+            STATUS: "UNCOMMITTED",
+            ORIGINAL: newData
+        })
+
+        return finalData
+
+    }
+
+    async deleteTransaction(data, transaction){
+
+        // Check the buffer, if the data is present in the buffer, check for the updata and create and delete operations.
+
+        // If DELETE operation is present in the buffer, then we will throw an error.
+        const deleteEntries = transaction.buffer.filter(entry =>
+            entry.OPERATION === "DELETE" && entry.DATA._id === data._id
+        );
+
+        if(deleteEntries.length > 0){
+            throw new Error("This data does not exist anymore.");
+        }
+
+        // If CREATE operation is present in the buffer, then we will update this CREATE operation with the new data.
+        const createIndex = transaction.buffer.findIndex(entry =>
+            entry.OPERATION === "CREATE" && entry.DATA._id === data._id
+        );
+
+        if (createIndex !== -1) {
+            // Remove the create operation from the buffer and return the data.
+            const createdData = transaction.buffer[createIndex].DATA;
+            transaction.buffer.splice(createIndex, 1); // remove CREATE
+            return createdData;
+        }
+
+        // If UPDATE operation is present in the buffer, then we will update this UPDATE operation with the new data.
+        const updateIndex = transaction.buffer.findIndex(entry =>
+            entry.OPERATION === "UPDATE" && entry.DATA._id === data._id
+        );
+
+        if (updateIndex !== -1) {
+            // Remove the update operation from the buffer and update the data.
+            const updatedData = transaction.buffer[updateIndex].DATA;
+            transaction.buffer.splice(updateIndex, 1); // remove UPDATE
+            transaction.buffer.push({
+                SCHEMA: this,
+                OPERATION: "DELETE",
+                DATA: updatedData,
+                STATUS: "UNCOMMITTED", 
+                ORIGINAL: transaction.buffer[updateIndex].ORIGINAL
+            });
+            return updatedData;
+        }
+
+        
+            
+        // Reaching here means that the data is not present in the buffer, so we will check in the sheets.
+
+        // Parse query and Log Query
+        const query = {_id: data._id}
+        let content = `UPDATE IN ${this.name} : `
+        const {finalQuery, logContent} = this.parseQuery(query, "ROW");
+        content = content + logContent + '\n';
+        if(this.loggerConfig.enabled){
+            logEntry(content, this.loggerConfig.logFilePath);
+        }
+        
+            // Query to find row to be deleted.
+        let formulaCell = await this.query(finalQuery, 'A1');
+
+        let emptyIndex = 0;
+
+        if(formulaCell.value){
+            emptyIndex = Number(formulaCell.value)
+        }
+
+        if(emptyIndex == 0){
+            throw new Error("No data found with this query")
+        }
+
+        // Lock the row and get data
+        let cells = await this.sheet.loadCells("A" +  emptyIndex  + ":Z" + emptyIndex);
+
+        let newData = {}
+
+        for(let i = 0; i < this.attributes.length; i++){
+            let ch = String.fromCharCode('A'.charCodeAt(0) + i);
+            let cell = this.sheet.getCellByA1(ch + emptyIndex);
+            const key = this.attributes[i].title
+            newData[key] = cell.value;
+        }
+
+        const cell = this.sheet.getCellByA1('Z' + emptyIndex);
+
+        // Locking This Row
+        cell.value = "EXCLUSIVE"
+        await this.sheet.saveUpdatedCells();
+
+        const finalData = {
+            ...newData,
+            ...data
+        }
+
+        transaction.buffer.push({
+            SCHEMA: this,
+            OPERATION: "DELETE",
+            DATA: finalData,
+            STATUS: "UNCOMMITTED",
+            ORIGINAL: newData
+        })
+
+        return finalData
+    }
 
 
 }
